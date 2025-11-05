@@ -12,6 +12,7 @@
 #include <unistd.h>
 
 #define BACKLOG 10 // how many pending connections queue holds
+#define MAXDATASIZE 100 // max number of bytes we can get at once
 
 /**
 3 *
@@ -66,6 +67,8 @@ int main(int argc, char *argv[])
 
     const char *accept_message = "Reply";
     int len, bytes_sent;
+
+    char buf[MAXDATASIZE];
 
     // first, load up address structs with getaddrinfo():
 
@@ -123,8 +126,17 @@ int main(int argc, char *argv[])
                inet_ntoa(((struct sockaddr_in *)&their_addr)->sin_addr),
                ntohs(((struct sockaddr_in *)&their_addr)->sin_port));
 
-        len = strlen(accept_message);
-        bytes_sent = send(new_fd, accept_message, len, 0);
+        memset(buf, 0, MAXDATASIZE);
+        size_t bytes_received = recv(new_fd, buf, MAXDATASIZE - 1, 0);
+        if (bytes_received < 0)
+        {
+            perror("Error receiving data");
+            exit(EXIT_FAILURE);
+        }
+
+        printf("Received %zu bytes: %s\n", bytes_received, buf);
+
+        bytes_sent = send(new_fd, accept_message, strlen(accept_message), 0);
         if (bytes_sent < 0)
         {
             perror("Error sending message");
