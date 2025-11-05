@@ -1,1 +1,11 @@
 ./build
+
+*.gz
+*.tar
+*.zip
+*.tar.gz
+
+.DS_Store
+.venv
+__pycache__/
+
