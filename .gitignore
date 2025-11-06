@@ -4,8 +4,14 @@
 *.tar
 *.zip
 *.tar.gz
+*.out
 
 .DS_Store
 .venv
 __pycache__/
 
+.rnvs_lock
+*.log
+build/
+build/webserver
+build/CMakeFiles/webserver.dir/webserver.c.o

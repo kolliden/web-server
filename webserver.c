@@ -11,7 +11,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-#define BACKLOG 10 // how many pending connections queue holds
+#define BACKLOG 10      // how many pending connections queue holds
 #define MAXDATASIZE 100 // max number of bytes we can get at once
 
 /**
@@ -55,29 +55,32 @@ int main(int argc, char *argv[])
     const char *host = argv[1];
     const char *port = argv[2];
 
-    printf("Server address:\n");
-    printf("IP Address: %s\n", host);
-    printf("Port: %s\n", port);
-
     struct addrinfo hints, *res;
     socklen_t addr_size;
 
     struct sockaddr_storage their_addr; // Copied from Beej's Guide till line
     int sockfd, new_fd;                 // listen on sock_fd, new connection on new_fd
 
-    const char *accept_message = "Reply";
-    int len, bytes_sent;
+    const char *accept_message = "Reply\r\n\r\n";
+    const char *bad_request_response =
+    "HTTP/1.1 400 Bad Request\r\n"
+    "Content-Length: 0\r\n"
+    "\r\n";
 
-    char buf[MAXDATASIZE];
+    int bytes_sent;
 
     // first, load up address structs with getaddrinfo():
 
     memset(&hints, 0, sizeof hints);
-    hints.ai_family = AF_UNSPEC; // use IPv4 or IPv6, whichever
+    hints.ai_family = AF_INET; // use IPv4
     hints.ai_socktype = SOCK_STREAM;
-    hints.ai_flags = AI_PASSIVE; // fill in my IP for me
+    hints.ai_flags = 0; // use my IP
 
-    getaddrinfo(NULL, port, &hints, &res);
+    if (getaddrinfo(host, port, &hints, &res) != 0)
+    {
+        perror("Error getting address info");
+        exit(EXIT_FAILURE);
+    }
 
     // make a socket:
 
@@ -126,23 +129,42 @@ int main(int argc, char *argv[])
                inet_ntoa(((struct sockaddr_in *)&their_addr)->sin_addr),
                ntohs(((struct sockaddr_in *)&their_addr)->sin_port));
 
-        memset(buf, 0, MAXDATASIZE);
-        size_t bytes_received = recv(new_fd, buf, MAXDATASIZE - 1, 0);
-        if (bytes_received < 0)
+        // receive data
+        size_t buf_len = 0;
+        ssize_t n;
+        char buf[MAXDATASIZE];
+
+        memset(buf, 0, MAXDATASIZE); // Clear the buffer before receiving data
+
+        while ((n = recv(new_fd, buf + buf_len, MAXDATASIZE - buf_len - 1, 0)) > 0)
         {
-            perror("Error receiving data");
-            exit(EXIT_FAILURE);
+            buf_len += n;
+            buf[buf_len] = '\0';
+
+            char *packet_end;
+            while ((packet_end = strstr(buf, "\r\n\r\n")) != NULL)
+            {
+                // Found one complete HTTP packet
+                if (send(new_fd, bad_request_response, strlen(bad_request_response), 0) < 0)
+                {
+                    perror("Error sending reply");
+                    close(new_fd);
+                    break;
+                }
+
+                char *packet = strndup(buf, packet_end - buf + 4);
+
+                printf("Processed a packet and sent reply.\nPacket data:\n%s\n", packet);
+
+                // Move remaining unprocessed data to the start
+                size_t processed_length = packet_end - buf + 4; // include "\r\n\r\n"
+                size_t remaining = buf_len - processed_length;
+                memmove(buf, buf + processed_length, remaining);
+                buf_len = remaining;
+                buf[buf_len] = '\0';
+            }
         }
 
-        printf("Received %zu bytes: %s\n", bytes_received, buf);
-
-        bytes_sent = send(new_fd, accept_message, strlen(accept_message), 0);
-        if (bytes_sent < 0)
-        {
-            perror("Error sending message");
-            exit(EXIT_FAILURE);
-        }
-        printf("Sent %d bytes: %s\n", bytes_sent, accept_message);
         close(new_fd);
     }
 
