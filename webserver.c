@@ -10,7 +10,7 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <unistd.h>
-//Test Kommentar =)
+
 #define BACKLOG 10      // how many pending connections queue holds
 #define MAXDATASIZE 100 // max number of bytes we can get at once
 
