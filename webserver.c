@@ -24,7 +24,8 @@ enum Method
     BADREQUEST = 0
 };
 
-typedef struct Resource { // ChatGPT till line 42
+typedef struct Resource
+{ // ChatGPT till line 42
     char *path;
     char *content;
     struct Resource *next;
@@ -33,8 +34,10 @@ typedef struct Resource { // ChatGPT till line 42
 Resource *resources = NULL;
 
 // Helper: find resource
-Resource *find_resource(const char *path) {
-    for (Resource *r = resources; r != NULL; r = r->next) {
+Resource *find_resource(const char *path)
+{
+    for (Resource *r = resources; r != NULL; r = r->next)
+    {
         if (strcmp(r->path, path) == 0)
             return r;
     }
@@ -154,8 +157,6 @@ int main(int argc, char *argv[])
         "Content-Length: 0\r\n"
         "\r\n";
 
-
-
     // first, load up address structs with getaddrinfo():
     memset(&hints, 0, sizeof hints);
     hints.ai_family = AF_INET; // use IPv4
@@ -239,50 +240,47 @@ int main(int argc, char *argv[])
 
                 char method[16], uri[256], version[16];
                 if (sscanf(packet, "%15s %255s %15s", method, uri, version) != 3)
-                {
                     reqType = BADREQUEST;
-                    break;
-                }
 
                 switch (reqType)
                 {
-                    case GET:
+                case GET:
+                {
+                    /* Valid GET request so inspect URI and serve static content */
+                    const char *body = NULL;
+                    if (strncmp(uri, "/static/", 8) == 0)
                     {
-                        /* Valid GET request so inspect URI and serve static content */
-                        const char *body = NULL;
-                        if (strncmp(uri, "/static/", 8) == 0)
-                        {
-                            const char *key = uri + 8;
-                            if (strcmp(key, "foo") == 0)
-                                body = "Foo";
-                            else if (strcmp(key, "bar") == 0)
-                                body = "Bar";
-                            else if (strcmp(key, "baz") == 0)
-                                body = "Baz";
-                        }
-                        //Check dynamic content
-                        if(strncmp(uri, "/dynamic/", 9) == 0)
-                        {
-                            const char *key = uri + 9;
-                            Resource *res = find_resource(key);
-                            if (res)
-                                body = res->content;
-                        }
-
-                        if (body)
-                        {
-                            int len = snprintf(response_buf, sizeof response_buf,
-                                            "HTTP/1.1 200 OK\r\nContent-Length: %zu\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n%s",
-                                            strlen(body), body);
-                            if (len > 0)
-                                response_len = (size_t)len;
-                        }
-                        else
-                        {
-                            response = not_found_response;
-                        }
+                        const char *key = uri + 8;
+                        if (strcmp(key, "foo") == 0)
+                            body = "Foo";
+                        else if (strcmp(key, "bar") == 0)
+                            body = "Bar";
+                        else if (strcmp(key, "baz") == 0)
+                            body = "Baz";
                     }
-                    break;
+                    // Check dynamic content
+                    if (strncmp(uri, "/dynamic/", 9) == 0)
+                    {
+                        const char *key = uri + 9;
+                        Resource *res = find_resource(key);
+                        if (res)
+                            body = res->content;
+                    }
+
+                    if (body)
+                    {
+                        int len = snprintf(response_buf, sizeof response_buf,
+                                           "HTTP/1.1 200 OK\r\nContent-Length: %zu\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n%s",
+                                           strlen(body), body);
+                        if (len > 0)
+                            response_len = (size_t)len;
+                    }
+                    else
+                    {
+                        response = not_found_response;
+                    }
+                }
+                break;
 
                 case PUT:
                     response = no_content;
