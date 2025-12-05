@@ -12,7 +12,7 @@
 #include <unistd.h>
 
 #define BACKLOG 10      // how many pending connections queue holds
-#define MAXDATASIZE 100 // max number of bytes we can get at once
+#define MAXDATASIZE 1000 // max number of bytes we can get at once
 
 enum Method
 {
@@ -43,6 +43,67 @@ Resource *find_resource(const char *path)
     }
     return NULL;
 }
+int put_resource(const char *path, const char *content)     
+{       
+    if (!path)
+    {
+        return -1;
+    }
+    if (!content)
+    {
+        content = "";
+    }
+    Resource *r = find_resource(path);
+    if (r) {                //Falls recourse bereits existiert
+        free(r->content);
+        char *dup = strdup(content);
+        if (!dup)
+        {
+            perror("String konnte nicht dupliziert werden.\n"); //Falls strdup fehlschlägt
+            return -1;
+        }
+        r->content = dup;
+        return 0;       //Ersetzt
+    }
+    //Falls resource noch nicht existiert
+    Resource *newR = malloc(sizeof(Resource));
+    if (!newR)
+    {
+        perror("malloc failed\n");
+    }
+    newR->path = strdup(path);
+    newR->content = strdup(content);
+    newR->next = resources;
+    resources = newR;
+    return 1;       //Neu erstellt
+}
+
+int delete_resource(const char *path)       //Standatr lösch implementierung einer LL
+{
+    if (!path)
+    {
+        perror("Fälschlicher Pfad\n");
+        return -1;
+    }
+    Resource *prev = NULL;
+    for (Resource *r = resources; r != NULL; prev = r, r = r->next)
+    {
+        if (strcmp(r->path, path) == 0)
+        {
+            if (prev)
+                prev->next = r->next;
+            else
+                resources = r->next;
+
+            free(r->path);
+            free(r->content);
+            free(r);
+            return 1;
+        }
+    }
+    return 0;
+}
+
 
 /**
 3 *
@@ -156,6 +217,14 @@ int main(int argc, char *argv[])
         "HTTP/1.1 201 Created\r\n"
         "Content-Length: 0\r\n"
         "\r\n";
+   const char *forbidden = 
+        "HTTP/1.1 403 Forbidden\r\n"
+        "Content-Length: 0\r\n"
+        "\r\n";
+    const char *ok = 
+        "HTTP/1.1 200 Ok\r\n"
+        "Content-Length: 0\r\n"
+        "\r\n";
 
     // first, load up address structs with getaddrinfo():
     memset(&hints, 0, sizeof hints);
@@ -222,8 +291,13 @@ int main(int argc, char *argv[])
 
         memset(buf, 0, MAXDATASIZE); // Clear the buffer before receiving data
 
-        while ((n = recv(new_fd, buf + buf_len, MAXDATASIZE - buf_len - 1, 0)) > 0)
+        while (1)       //Endlosschleife 
         {
+            n = recv(new_fd, buf + buf_len, MAXDATASIZE - buf_len - 1, 0);
+            if (n <= 0)     //Falls recv fehlschlägt oder alle Bytes gesendet wurde
+            {
+                break;
+            }
             buf_len += n;
             buf[buf_len] = '\0';
 
@@ -232,6 +306,21 @@ int main(int argc, char *argv[])
             {
                 // Found one complete HTTP packet
                 char *packet = strndup(buf, packet_end - buf + 4);
+
+                int content_length = 0;
+                char *cl_ptr = strstr(packet, "Content-Length:"); //Suche content length in anfrage
+                if (cl_ptr) {
+                    sscanf(cl_ptr, "Content-Length: %d", &content_length);
+                }
+                char *content = NULL;
+                if (content_length > 0) {
+                    content = malloc(content_length + 1);   //Alloc memory für content und nullterminierung
+                    if (content) {
+                        char *body_start = packet_end + 4;
+                        memcpy(content, body_start, content_length);
+                        content[content_length] = '\0'; // Null-terminieren
+                    }
+                }
 
                 int reqType = check_http_request(packet);
                 char *response = NULL;
@@ -266,7 +355,7 @@ int main(int argc, char *argv[])
                         if (res)
                             body = res->content;
                     }
-
+                    else response = not_found_response;
                     if (body)
                     {
                         int len = snprintf(response_buf, sizeof response_buf,
@@ -282,11 +371,37 @@ int main(int argc, char *argv[])
                 }
                 break;
 
-                case PUT:
-                    response = no_content;
+                case PUT:{
+                    if (strncmp(uri, "/dynamic/", 9) == 0)
+                    {
+                        const char *key = uri + 9;
+                        int flag = 0;
+                        if ((flag = put_resource(key, content)) == 1)       //Bei created
+                        {
+                            response = created;
+                        }
+                        else if (flag == 0)
+                        {
+                            response = no_content;
+                        }
+                        else response = not_found_response;
+                    }
+                    else response = forbidden;
+                }
                     break;
-                case DELETE:
-                    response = no_content;
+                case DELETE:{
+                    if (strncmp(uri, "/dynamic/", 9) == 0)
+                    {
+                        const char *key = uri + 9;
+
+                        if (delete_resource(key) == 1)      //Bei erfolgreichem löschen
+                        {
+                            response = no_content;
+                        }
+                        else response = not_found_response;
+                    }
+                    else response = forbidden;
+                }
                     break;
                 case UNKNOWN:
                     response = code_501;
@@ -318,12 +433,18 @@ int main(int argc, char *argv[])
                 printf("Processed a packet and sent reply.\nPacket data:\n%s\nResponse:\n%s", packet, response);
 
                 // Move remaining unprocessed data to the start
-                size_t processed_length = packet_end - buf + 4; // include "\r\n\r\n"
-                size_t remaining = buf_len - processed_length;
-                memmove(buf, buf + processed_length, remaining);
-                buf_len = remaining;
-                buf[buf_len] = '\0';
-                free(packet);
+            size_t header_length = packet_end - buf + 4;
+            size_t processed_length = header_length + content_length;
+
+            size_t remaining = buf_len - processed_length;
+            memmove(buf, buf + processed_length, remaining);
+            buf_len = remaining;
+            buf[buf_len] = '\0';
+
+            free(packet);
+            if (content) {
+                free(content); // Don't forget to free the body!
+            }
             }
         }
 
